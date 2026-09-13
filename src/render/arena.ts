@@ -58,18 +58,22 @@ export function buildArena(def: ArenaDef): ArenaView {
 
   const breakables: THREE.Object3D[] = def.breakables.map((b) => {
     const console3d = new THREE.Group()
+    // Kept below waist height. A console tall enough to cover a fighter's
+    // torso reads as an obstruction rather than as scenery once the camera
+    // orbits behind it.
+    const HEIGHT = 0.55
     const body = withOutline(
       new THREE.Mesh(
-        new THREE.BoxGeometry(fxToFloat(b.hw) * 2, 0.95, fxToFloat(b.hd) * 2),
+        new THREE.BoxGeometry(fxToFloat(b.hw) * 2, HEIGHT, fxToFloat(b.hd) * 2),
         toonMaterial(0x24344f),
       ),
     )
-    body.position.y = 0.475
+    body.position.y = HEIGHT / 2
     const panel = new THREE.Mesh(
-      new THREE.BoxGeometry(fxToFloat(b.hw) * 1.7, 0.1, fxToFloat(b.hd) * 1.7),
+      new THREE.BoxGeometry(fxToFloat(b.hw) * 1.7, 0.08, fxToFloat(b.hd) * 1.7),
       toonMaterial(def.gridColor, def.gridColor),
     )
-    panel.position.y = 0.98
+    panel.position.y = HEIGHT + 0.03
     console3d.add(body, panel)
     console3d.position.set(fxToFloat(b.x), 0, fxToFloat(b.z))
     group.add(console3d)

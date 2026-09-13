@@ -3,13 +3,14 @@
 A 3D arena fighter prototype — Tekken-style framing, frame-data-driven combat,
 and a deterministic simulation built for rollback netcode.
 
-Four fighters, local versus and training modes, playable in a browser with no
-engine install. Original characters; no licensed IP.
+Four fighters, an arcade ladder against a CPU opponent, local versus, and
+training mode — playable in a browser with no engine install. Original
+characters; no licensed IP.
 
 ```bash
 npm install
 npm run dev        # http://localhost:5178
-npm test           # 67 tests
+npm test           # 95 tests
 npm run build      # typecheck + production bundle
 ```
 
@@ -37,6 +38,18 @@ byte-identical input frames — replays and netcode stay device-agnostic.
 - **Guard + Special** — spend a full signature meter (except Echo-Nine, whose
   adaptation triggers itself).
 - **F1** — draw the sim's live hitboxes and hurtboxes. **F2** — frame-time readout.
+- **Tab** — cycle Versus / Arcade / Training.
+
+## Modes
+
+**Arcade** — one player against the CPU. The ladder runs every other fighter in
+a seeded order and finishes with a mirror of your own character, always at
+Elite. Difficulty ramps one tier across the run. Losing offers a ten-second
+continue.
+
+**Versus** — two players at one keyboard, or two pads.
+
+**Training** — health and special regenerate, rounds never end.
 
 ---
 
@@ -69,7 +82,9 @@ src/core/          the simulation — no three.js, no DOM, no floats
   collision.ts     facing-relative box transforms and overlap
   sim.ts           advanceFrame(state, inputs, config)
   rollback.ts      local and rollback sessions
+  ai.ts            CPU opponent
 src/data/          the roster and arenas, as pure data
+src/game/          arcade ladder
 src/render/        three.js: cel shading, rig, effects, camera
 src/ui/            HUD and character select (DOM)
 ```
@@ -94,15 +109,30 @@ Rendering interpolates between the two most recent simulated frames, so the
 60 Hz sim looks smooth on a 144 Hz display. Input is polled immediately before
 each tick rather than once per animation frame.
 
+**The CPU emits an InputFrame and nothing else.** It never writes to match
+state, never calls into the sim, and never reads anything a player could not
+see. Because its output goes down the same path as a pad, it is structurally
+incapable of doing something a human could not — no cancelling out of recovery,
+no reacting on the frame a hitbox spawns unless its reaction budget allows it.
+It is deterministic too, so an arcade match replays like any other.
+
+Camera framing is a pure function (`solveCameraFraming`) rather than something
+that mutates a three.js camera in place. It is solved iteratively, because the
+orbit angle, the distance, and the wall clearance all depend on each other —
+placing the camera in one pass produced two separate bugs that only showed up
+on screen. It now has its own regression tests over every position two fighters
+can reach at six viewport shapes.
+
 ---
 
 ## What is and isn't here
 
 **Working:** the full loop — character select → arena → combat → win/loss →
-rematch. Six-axis movement with sidestep and dashes, frame-data hitboxes,
-combo cancels with damage scaling, blocking by height, parries, throws with
-techs, counter-hits, juggles, wall-splats, breakable scenery, all four meters
-and bursts, projectiles, hitstop, round and match flow, training mode.
+rematch, plus an arcade ladder with a CPU opponent at three difficulty tiers.
+Six-axis movement with sidestep and dashes, frame-data hitboxes, combo cancels
+with damage scaling, blocking by height, parries, throws with techs,
+counter-hits, juggles, wall-splats, breakable scenery, all four meters and
+bursts, projectiles, hitstop, round and match flow, training mode.
 
 **Deliberately not here:**
 
@@ -112,6 +142,8 @@ and bursts, projectiles, hitstop, round and match flow, training mode.
   swapping them in touches only `src/render/`.
 - **Netcode transport.** The rollback *machinery* is built and tested, but
   there is no matchmaking, socket layer, or frame-delay negotiation.
+- **Two dead states.** `St.AirRecovery` and `St.ThrowConnected` are declared in
+  the state machine but nothing transitions into them yet.
 - **The performance and latency targets are unverified.** "60 FPS with zero
   drops under heavy particles" and "<16 ms input latency" cannot be measured
   against placeholder geometry and no particle budget. F2 shows real frame

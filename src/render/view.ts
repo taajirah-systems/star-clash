@@ -35,10 +35,12 @@ export class View {
   private cur: Transform[] = []
   private debug = false
   private debugBoxes: THREE.Box3Helper[] = []
+  private readonly arenaHalfWidth: number
   private readonly camTarget = new THREE.Vector3()
   private readonly camPos = new THREE.Vector3(0, 3.2, 8.5)
 
   constructor(canvas: HTMLCanvasElement, arenaDef: ArenaDef, charIndices: readonly number[]) {
+    this.arenaHalfWidth = arenaDef.halfWidth
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' })
     this.renderer.setClearColor(arenaDef.fogColor)
     // Capped at 2: beyond that the pixel cost buys nothing visible and is the
@@ -144,50 +146,29 @@ export class View {
 
   /**
    * Tekken-style framing: sit on the axis through both fighters, back off as
-   * they separate, and keep the pair centred. Distance is clamped so a corner
-   * exchange never pushes the camera through the arena rail.
+   * they separate, and keep the pair centred. The maths lives in
+   * `solveCameraFraming` so it can be tested without a WebGL context — it went
+   * wrong twice (once behind a wall, once jammed against one), and neither
+   * failure was catchable by anything but looking at the screen.
    */
   private updateCamera(state: MatchState, alpha: number): void {
     const a = this.lerped(0, alpha)
     const b = this.lerped(1, alpha)
-    const midX = (a.x + b.x) / 2
-    const midZ = (a.z + b.z) / 2
-    const midY = (a.y + b.y) / 2
 
-    const dx = b.x - a.x
-    const dz = b.z - a.z
-    const sep = Math.hypot(dx, dz)
+    const shot = solveCameraFraming({
+      ax: a.x, az: a.z, bx: b.x, bz: b.z,
+      midY: (a.y + b.y) / 2,
+      aspect: this.camera.aspect,
+      fovDegrees: this.camera.fov,
+      arenaHalfWidth: fxToFloat(this.arenaHalfWidth),
+    })
 
-    // Solve for the distance that actually fits the pair, rather than scaling a
-    // magic number by the aspect. Scaling overshoots badly on a tall window: it
-    // assumes the full 16:9 width is needed when the fighters only ever occupy
-    // the middle of it, and pushes the camera far enough back that they shrink.
-    const halfV = Math.tan((this.camera.fov * Math.PI) / 360)
-    const halfH = halfV * this.camera.aspect
-    const needWidth = sep + 3.0   // both bodies plus breathing room
-    const needHeight = 3.6        // tallest fighter plus a juggle's headroom
-    const dist = THREE.MathUtils.clamp(
-      Math.max(needWidth / 2 / halfH, needHeight / 2 / halfV),
-      5.0,
-      20,
-    )
+    this.camTarget.set(shot.targetX, shot.targetY, shot.targetZ)
+    this.camPos.set(shot.x, shot.y, shot.z)
 
-    // Perpendicular to the line between the fighters, so both stay in profile.
-    const len = Math.max(sep, 0.001)
-    const px = -dz / len
-    const pz = dx / len
-    const side = pz >= 0 ? 1 : -1
-
-    const target = this.camTarget.set(midX, midY + 1.15, midZ)
-    const want = this.camPos.set(
-      midX + px * dist * side,
-      midY + 1.55 + dist * 0.16,
-      midZ + pz * dist * side,
-    )
-
-    this.camera.position.lerp(want, 0.12)
+    this.camera.position.lerp(this.camPos, 0.12)
     this.camera.position.add(this.effects.shakeOffset())
-    this.camera.lookAt(target)
+    this.camera.lookAt(this.camTarget)
     void state
   }
 
@@ -248,4 +229,136 @@ function setBox(
   ;(helper.material as THREE.LineBasicMaterial).color.setHex(color)
   helper.visible = true
   helper.updateMatrixWorld(true)
+}
+
+/* ------------------------------------------------------------------ */
+/* Camera framing                                                       */
+/* ------------------------------------------------------------------ */
+
+export interface FramingInput {
+  ax: number
+  az: number
+  bx: number
+  bz: number
+  midY: number
+  aspect: number
+  fovDegrees: number
+  arenaHalfWidth: number
+}
+
+export interface FramingResult {
+  x: number
+  y: number
+  z: number
+  targetX: number
+  targetY: number
+  targetZ: number
+  distance: number
+  /** Half-width of the view at the fighters' depth; the tests use it. */
+  halfViewWidth: number
+}
+
+/** How close to a side wall the camera is allowed to be framed. */
+export const WALL_MARGIN = 2.2
+/**
+ * How far the orbit may swing away from the depth axis. Kept under 45 degrees
+ * so the camera is always more in front of the action than beside it.
+ */
+export const MAX_ORBIT_RADIANS = (40 * Math.PI) / 180
+/** Keep the camera itself this far inside the side walls. */
+const CAMERA_WALL_CLEARANCE = 0.6
+/** Half a body plus a little air, added to the lateral fit. */
+const BODY_MARGIN = 0.9
+const MAX_DISTANCE = 30
+
+/**
+ * Pure camera solve. No three.js state, no side effects — position and
+ * look-at from fighter positions and viewport shape alone.
+ *
+ * Solved iteratively rather than in one shot. The three quantities involved
+ * are circular: the orbit angle is limited by how much room the distance
+ * leaves before the wall, and the distance needed depends on how far off the
+ * view axis the orbit puts the fighters. Placing the camera once and hoping
+ * was what produced both of the framing bugs this replaced — a camera behind
+ * the wall, and fighters cropped out of shot on a narrow window.
+ */
+export function solveCameraFraming(input: FramingInput): FramingResult {
+  const { ax, az, bx, bz, midY, aspect, fovDegrees, arenaHalfWidth } = input
+  const midX = (ax + bx) / 2
+  const midZ = (az + bz) / 2
+  const dx = bx - ax
+  const dz = bz - az
+  const sep = Math.hypot(dx, dz)
+
+  // Pull the framing centre away from the side walls. Centring exactly on the
+  // fighters parks the camera inches from a wall during a corner exchange, and
+  // the wall then sweeps across the frame and hides the fight behind it.
+  // Clamping the camera's own position instead jams it against the wall at
+  // point-blank range, so the centre is what moves.
+  const limit = Math.max(0, arenaHalfWidth - WALL_MARGIN)
+  const frameX = Math.min(limit, Math.max(-limit, midX))
+  const offset = Math.abs(midX - frameX)
+
+  const halfV = Math.tan((fovDegrees * Math.PI) / 360)
+  const halfH = halfV * aspect
+
+  // Perpendicular to the line between the fighters, so both stay in profile —
+  // clamped, because a pure perpendicular swings onto the X axis when the
+  // fighters line up along Z, which is how the camera ended up outside the
+  // arena filming the back of a wall.
+  const len = Math.max(sep, 0.001)
+  const side = dx / len >= 0 ? 1 : -1
+  const angle = Math.min(
+    MAX_ORBIT_RADIANS,
+    Math.max(-MAX_ORBIT_RADIANS, Math.atan2((-dz / len) * side, (dx / len) * side)),
+  )
+
+  const camLimit = Math.max(0.5, arenaHalfWidth - CAMERA_WALL_CLEARANCE)
+  let distance = Math.max(5, (sep + 3 + offset * 2) / 2 / halfH, 3.6 / 2 / halfV)
+
+  let x = frameX
+  let z = midZ + distance
+  let halfViewWidth = distance * halfH
+
+  for (let pass = 0; pass < 6; pass++) {
+    // Limit the swing to whatever X room is left before the wall, rather than
+    // clamping the finished position — clamping the position moves the camera
+    // without moving what it is looking at, which is what jammed it into the
+    // corner at point-blank range.
+    const hiSin = (camLimit - frameX) / distance
+    const loSin = (-camLimit - frameX) / distance
+    const sinA = Math.min(1, Math.max(-1, Math.min(hiSin, Math.max(loSin, Math.sin(angle)))))
+    const cosA = Math.sqrt(Math.max(0, 1 - sinA * sinA))
+
+    x = frameX + sinA * distance
+    z = midZ + cosA * side * distance
+    halfViewWidth = distance * halfH
+
+    // Measure how far off the view axis the fighters actually ended up, and
+    // back off if the frustum does not cover them.
+    const fwdX = frameX - x
+    const fwdZ = midZ - z
+    const fwdLen = Math.hypot(fwdX, fwdZ) || 1
+    const rightX = -fwdZ / fwdLen
+    const rightZ = fwdX / fwdLen
+    let lateral = 0
+    for (const [fx, fz] of [[ax, az], [bx, bz]] as const) {
+      lateral = Math.max(lateral, Math.abs((fx - x) * rightX + (fz - z) * rightZ))
+    }
+
+    const needed = (lateral + BODY_MARGIN) / halfH
+    if (needed <= distance + 1e-6 || distance >= MAX_DISTANCE) break
+    distance = Math.min(MAX_DISTANCE, needed)
+  }
+
+  return {
+    x,
+    y: midY + 1.55 + distance * 0.16,
+    z,
+    targetX: frameX,
+    targetY: midY + 1.15,
+    targetZ: midZ,
+    distance,
+    halfViewWidth,
+  }
 }

@@ -25,6 +25,8 @@ export class CharacterSelect {
   private readonly statBars: HTMLElement[][] = []
   private cursor: [number, number] = [0, 1]
   private locked: [boolean, boolean] = [false, false]
+  /** Arcade: only player one picks, and the CPU slot locks itself. */
+  private singlePlayer = false
   private prevInput: [InputFrame, InputFrame] = [0, 0]
   private spin = 0
   private done: ((r: SelectResult) => void) | null = null
@@ -117,6 +119,11 @@ export class CharacterSelect {
     this.root.appendChild(hint)
   }
 
+  setSinglePlayer(on: boolean): void {
+    this.singlePlayer = on
+    this.root.classList.toggle('single', on)
+  }
+
   resize(): void {
     const w = this.canvas.clientWidth || window.innerWidth
     const h = this.canvas.clientHeight || 380
@@ -156,7 +163,8 @@ export class CharacterSelect {
   update(inputs: readonly [InputFrame, InputFrame], dt: number): void {
     this.spin += dt
 
-    for (let p = 0 as 0 | 1; p < 2; p = (p + 1) as 0 | 1) {
+    const players: (0 | 1)[] = this.singlePlayer ? [0] : [0, 1]
+    for (const p of players) {
       const cur = inputs[p] ?? 0
       const prev = this.prevInput[p]
       if (!this.locked[p]) {
@@ -175,23 +183,27 @@ export class CharacterSelect {
       this.prevInput[p] = cur
     }
 
+    // In arcade the CPU slot follows player one so the ladder can start from
+    // one confirm, and its marker is hidden.
+    if (this.singlePlayer) this.locked[1] = this.locked[0]
+
     this.cards.forEach((card, i) => {
       const p1Here = this.cursor[0] === i
-      const p2Here = this.cursor[1] === i
+      const p2Here = !this.singlePlayer && this.cursor[1] === i
       card.classList.toggle('p1', p1Here)
       card.classList.toggle('p2', p2Here)
       card.classList.toggle('locked', (p1Here && this.locked[0]) || (p2Here && this.locked[1]))
       const tag = card.querySelector('.select-cursors')
       if (tag) {
         const marks: string[] = []
-        if (p1Here) marks.push(this.locked[0] ? 'P1 ✔' : 'P1')
+        if (p1Here) marks.push(this.locked[0] ? (this.singlePlayer ? '✔' : 'P1 ✔') : this.singlePlayer ? '▶' : 'P1')
         if (p2Here) marks.push(this.locked[1] ? 'P2 ✔' : 'P2')
         tag.textContent = marks.join('  ')
       }
     })
 
     this.views.forEach((view, i) => {
-      const selected = this.cursor[0] === i || this.cursor[1] === i
+      const selected = this.cursor[0] === i || (!this.singlePlayer && this.cursor[1] === i)
       // The highlighted fighter turns to face the player; the rest idle away.
       view.group.rotation.y = selected
         ? Math.sin(this.spin * 1.1) * 0.5
@@ -214,6 +226,12 @@ export class CharacterSelect {
   reset(): void {
     this.locked = [false, false]
     this.prevInput = [0, 0]
+  }
+
+  /** Updates the hint line to match the active mode. */
+  setHint(html: string): void {
+    const hint = this.root.querySelector('.select-hint')
+    if (hint) hint.innerHTML = html
   }
 
   dispose(): void {

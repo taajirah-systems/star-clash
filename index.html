@@ -109,15 +109,27 @@
   .result-score { font-size: 22px; color: var(--dim); margin-top: 8px; letter-spacing: .3em; }
   .result-actions { margin-top: 26px; display: flex; gap: 26px; justify-content: center; font-size: 12px; color: var(--dim); }
   .result-actions b { color: var(--ink); }
+  .stage-tag { font-size: 11px; letter-spacing: .42em; color: #d08bff; margin-bottom: 10px; }
+  .continue-count {
+    font-size: clamp(48px, 11vw, 110px); font-weight: 700; color: #ff8f5e;
+    line-height: 1; margin-top: 10px;
+  }
 
-  #mode {
-    position: absolute; top: 14px; right: 18px; z-index: 5;
+  .toolbar { position: absolute; top: 14px; right: 18px; z-index: 5; display: flex; gap: 8px; }
+  .toolbar button {
     font: inherit; font-size: 10px; letter-spacing: .16em; padding: 6px 12px;
     color: var(--ink); background: var(--panel); border: 1px solid var(--line);
     border-radius: 4px; cursor: pointer;
   }
-  #mode.training { border-color: #3aa17a; color: #8ff0c4; }
-  #app[data-screen="fight"] #mode { display: none; }
+  .toolbar button:hover { border-color: var(--ink); }
+  #mode[data-mode="training"] { border-color: #3aa17a; color: #8ff0c4; }
+  #mode[data-mode="arcade"] { border-color: #d08bff; color: #e6c6ff; }
+  #difficulty { border-color: #d08bff; color: #e6c6ff; }
+  #difficulty[hidden] { display: none; }
+  #app[data-screen="fight"] .toolbar { display: none; }
+
+  /* Arcade uses a single cursor; the P2 legend would be misleading. */
+  #select-ui.single .select-card.p2 { box-shadow: none; }
 
   #perf {
     position: absolute; left: 18px; top: 96px; font-size: 10px; color: #8ff0c4;
@@ -149,12 +161,15 @@
       <div id="overlay"></div>
     </div>
 
-    <button id="mode">MODE: VERSUS</button>
+    <div class="toolbar">
+      <button id="difficulty" hidden>CPU: VETERAN</button>
+      <button id="mode" data-mode="versus">MODE: VERSUS</button>
+    </div>
     <div id="perf"></div>
     <div id="keys">
       P1 &nbsp; WASD move · J light · K heavy · L special · U throw · I jump · H guard<br>
       P2 &nbsp; ARROWS move · Num1 light · Num2 heavy · Num3 special · Num4 throw · Num5 jump · Num6 guard<br>
-      Down+Special = second signature move &nbsp;·&nbsp; Guard+Special = burst &nbsp;·&nbsp; F1 hitboxes &nbsp;·&nbsp; F2 perf
+      Down+Special = second signature move &nbsp;·&nbsp; Guard+Special = burst &nbsp;·&nbsp; F1 hitboxes &nbsp;·&nbsp; F2 perf &nbsp;·&nbsp; Tab cycles mode
     </div>
   </div>
   <script type="module" src="/src/main.ts"></script>
