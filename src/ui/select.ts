@@ -204,10 +204,14 @@ export class CharacterSelect {
 
     this.views.forEach((view, i) => {
       const selected = this.cursor[0] === i || (!this.singlePlayer && this.cursor[1] === i)
-      // The highlighted fighter turns to face the player; the rest idle away.
+      // The rig is authored facing +X, so a quarter turn is what actually
+      // points it at the camera; without it every preview showed its back.
+      // The highlighted fighter turns to face the player, the rest stay in
+      // three-quarter view.
+      const FACE_CAMERA = -Math.PI / 2
       view.group.rotation.y = selected
-        ? Math.sin(this.spin * 1.1) * 0.5
-        : Math.PI * 0.32 + Math.sin(this.spin * 0.4 + i) * 0.12
+        ? FACE_CAMERA + Math.sin(this.spin * 1.1) * 0.35
+        : FACE_CAMERA + 0.75 + Math.sin(this.spin * 0.4 + i) * 0.12
       view.group.position.y = selected ? -0.85 + Math.sin(this.spin * 2.2) * 0.03 : -0.95
       void i
       view.setPose(selected ? St.Idle : St.GuardStand, this.spin * 60, null, 0, false, false)

@@ -3,19 +3,20 @@
  *
  * Rendering interpolates between the previous and current simulated frames.
  * The sim runs on a fixed 60 Hz tick and the display may be 60, 120, or 144 Hz;
- * without interpolation the mismatch shows up as judder that looks exactly like
+ * without interpolation the mismatch shows up as judder indistinguishable from
  * dropped frames.
  */
 
 import * as THREE from 'three'
-import type { ArenaDef } from '../core/defs'
+import type { ArenaDef, MoveDef } from '../core/defs'
 import { fxToFloat } from '../core/fx'
-import { SF, has } from '../core/fsm'
+import { St, SF, has } from '../core/fsm'
 import { moveOf, characterAt } from '../data/roster'
 import type { MatchState } from '../core/state'
 import { buildArena, type ArenaView } from './arena'
 import { buildFighter, type FighterView } from './fighter'
 import { buildEffects, type Effects } from './effects'
+import { buildPostChain, type PostChain } from './post'
 
 interface Transform {
   x: number
@@ -31,6 +32,7 @@ export class View {
   private arena: ArenaView
   private fighters: FighterView[] = []
   private effects: Effects
+  private post: PostChain | null
   private prev: Transform[] = []
   private cur: Transform[] = []
   private debug = false
@@ -38,6 +40,11 @@ export class View {
   private readonly arenaHalfWidth: number
   private readonly camTarget = new THREE.Vector3()
   private readonly camPos = new THREE.Vector3(0, 3.2, 8.5)
+  private readonly tipScratch = new THREE.Vector3()
+  /** Per-fighter white flash level, decayed each frame. */
+  private hitFlash = [0, 0]
+  private elapsed = 0
+  private lastState: St[] = [St.Idle, St.Idle]
 
   constructor(canvas: HTMLCanvasElement, arenaDef: ArenaDef, charIndices: readonly number[]) {
     this.arenaHalfWidth = arenaDef.halfWidth
@@ -46,9 +53,14 @@ export class View {
     // Capped at 2: beyond that the pixel cost buys nothing visible and is the
     // most common reason a 60 FPS target quietly becomes a 40 FPS one.
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+    this.renderer.shadowMap.enabled = true
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping
+    this.renderer.toneMappingExposure = 0.92
 
-    this.scene.fog = new THREE.Fog(arenaDef.fogColor, 12, 30)
-    this.camera = new THREE.PerspectiveCamera(48, 16 / 9, 0.1, 120)
+    // Fog starts well past the fighters so it never dims them, only the stage.
+    this.scene.fog = new THREE.Fog(arenaDef.fogColor, 26, 70)
+    this.camera = new THREE.PerspectiveCamera(46, 16 / 9, 0.1, 200)
 
     this.arena = buildArena(arenaDef)
     this.scene.add(this.arena.group)
@@ -71,6 +83,7 @@ export class View {
       this.scene.add(helper)
     }
 
+    this.post = buildPostChain(this.renderer, this.scene, this.camera)
     this.resize()
     window.addEventListener('resize', () => this.resize())
   }
@@ -86,6 +99,7 @@ export class View {
     this.renderer.setSize(w, h, false)
     this.camera.aspect = w / h
     this.camera.updateProjectionMatrix()
+    this.post?.setSize(w, h, Math.min(window.devicePixelRatio, 2))
   }
 
   /** Called once per simulated tick, before the sim advances. */
@@ -105,9 +119,17 @@ export class View {
 
   /** `alpha` is the fraction of a tick elapsed since the last sim step. */
   render(state: MatchState, alpha: number, dt: number): void {
+    this.elapsed += dt
+
+    // A hit flashes the fighter who took it, not the one who threw it.
+    for (const e of state.events) {
+      if (e.blocked && !e.parried) continue
+      const victim = e.attacker === 0 ? 1 : 0
+      this.hitFlash[victim] = Math.max(this.hitFlash[victim] ?? 0, e.counter ? 1 : 0.7)
+    }
+
     this.effects.emit(state.events)
     this.effects.syncProjectiles(state)
-    this.effects.update(dt)
 
     for (let i = 0; i < this.fighters.length; i++) {
       const f = state.fighters[i]
@@ -120,37 +142,62 @@ export class View {
         p.y + (c.y - p.y) * alpha,
         p.z + (c.z - p.z) * alpha,
       )
-      // The rig is authored facing +X (limbs separated along Z), which is the
-      // same axis the sim's `facing` uses, so facing +1 needs no rotation at
-      // all and facing -1 is a half turn. Snapped rather than lerped: a
-      // fighter turning through 180 degrees mid-combo would otherwise be shown
-      // in profile on exactly the frames the player needs to read the hit.
+      // Facing snaps rather than lerps: a fighter turning through 180 degrees
+      // mid-combo would otherwise be shown in profile on exactly the frames
+      // the player needs to read the hit. The rig is authored facing +X, the
+      // same axis the sim's `facing` uses, so +1 needs no rotation at all.
       view.group.rotation.y = c.facing === 1 ? 0 : Math.PI
 
       const mv = moveOf(f.charIndex, f.moveIndex)
-      view.setPose(
-        f.state,
-        f.stateFrame,
-        mv,
-        f.moveFrame,
-        f.payloadFrames > 0,
-        f.shieldFrames > 0,
-      )
+      view.setPose(f.state, f.stateFrame, mv, f.moveFrame, f.payloadFrames > 0, f.shieldFrames > 0)
+
+      this.hitFlash[i] = Math.max(0, (this.hitFlash[i] ?? 0) - dt * 7)
+      view.setFlash(this.hitFlash[i] ?? 0)
+
+      // Weapon trail across the swing, broken at both ends so two separate
+      // strikes never smear into one another.
+      const slot: 0 | 1 = i === 0 ? 0 : 1
+      const def = characterAt(f.charIndex).def
+      if (mv && this.isSwinging(mv, f.moveFrame)) {
+        this.effects.feedTrail(slot, view.strikeTip(this.tipScratch), def.accent, this.camera.position)
+      } else {
+        this.effects.feedTrail(slot, null, def.accent, this.camera.position)
+      }
+
+      // Kick up dust on the frame a dash or a landing starts.
+      const was = this.lastState[i] ?? St.Idle
+      if (f.state !== was) {
+        if (f.state === St.DashForward || f.state === St.DashBack) {
+          this.effects.dust(c.x, 0, c.z, f.state === St.DashForward ? f.facing : -f.facing)
+        } else if (was === St.JumpFall && has(f.state, SF.Grounded)) {
+          this.effects.dust(c.x, 0, c.z, 1)
+          this.effects.dust(c.x, 0, c.z, -1)
+        }
+        this.lastState[i] = f.state
+      }
     }
 
-    this.arena.update(state.breakableIntegrity)
+    this.effects.update(dt, this.camera)
+    this.arena.update(state.breakableIntegrity, this.elapsed)
     this.updateCamera(state, alpha)
     this.updateDebug(state)
-    this.renderer.render(this.scene, this.camera)
+
+    this.post?.setImpact(this.effects.impact())
+    this.post?.setFlash(this.effects.flash(), this.effects.flashColor())
+
+    if (this.post) this.post.render()
+    else this.renderer.render(this.scene, this.camera)
   }
 
-  /**
-   * Tekken-style framing: sit on the axis through both fighters, back off as
-   * they separate, and keep the pair centred. The maths lives in
-   * `solveCameraFraming` so it can be tested without a WebGL context — it went
-   * wrong twice (once behind a wall, once jammed against one), and neither
-   * failure was catchable by anything but looking at the screen.
-   */
+  /** True on the frames a move's hitboxes are live, plus a lead-in and tail. */
+  private isSwinging(mv: MoveDef, frame: number): boolean {
+    if (mv.hitboxes.length === 0) return false
+    for (const hb of mv.hitboxes) {
+      if (frame >= hb.from - 2 && frame <= hb.to + 3) return true
+    }
+    return false
+  }
+
   private updateCamera(state: MatchState, alpha: number): void {
     const a = this.lerped(0, alpha)
     const b = this.lerped(1, alpha)
@@ -165,6 +212,11 @@ export class View {
 
     this.camTarget.set(shot.targetX, shot.targetY, shot.targetZ)
     this.camPos.set(shot.x, shot.y, shot.z)
+
+    // Punch in slightly on impact. A few percent is enough to feel; more and
+    // the camera reads as unstable rather than as reacting.
+    const punch = 1 - this.effects.impact() * 0.055
+    this.camPos.sub(this.camTarget).multiplyScalar(punch).add(this.camTarget)
 
     this.camera.position.lerp(this.camPos, 0.12)
     this.camera.position.add(this.effects.shakeOffset())
@@ -192,9 +244,7 @@ export class View {
       const def = characterAt(f.charIndex).def
       const hb = has(f.state, SF.Crouching) ? def.crouchHurtbox : def.hurtbox
       const helper = this.debugBoxes[slot++]
-      if (helper) {
-        setBox(helper, f.x, f.y, f.z, f.facing, hb, 0x33ff88)
-      }
+      if (helper) setBox(helper, f.x, f.y, f.z, f.facing, hb, 0x33ff88)
       const mv = moveOf(f.charIndex, f.moveIndex)
       if (!mv) return
       for (const spec of mv.hitboxes) {
@@ -208,6 +258,7 @@ export class View {
 
   dispose(): void {
     for (const f of this.fighters) f.dispose()
+    this.post?.dispose()
     this.renderer.dispose()
   }
 }
