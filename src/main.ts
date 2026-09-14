@@ -82,7 +82,7 @@ function setMode(next: Mode): void {
   select.setHint(
     next === 'arcade'
       ? '<b>P1</b> A/D move · J confirm<br><span class="dim">Fight the roster, then a mirror of yourself. Losing offers a continue.</span>'
-      : '<b>P1</b> A/D move · J confirm &nbsp;&nbsp; <b>P2</b> ←/→ move · Numpad1 confirm' +
+      : '<b>P1</b> A/D move · J confirm &nbsp;&nbsp; <b>P2</b> ←/→ move · ; confirm' +
         '<br><span class="dim">Both players confirm to begin. Pick the same fighter for a mirror match.</span>',
   )
 }
@@ -97,10 +97,25 @@ difficultyButton.addEventListener('click', () => setDifficulty(((difficulty + 1)
 setMode('versus')
 setDifficulty(Difficulty.Veteran)
 
+/**
+ * Every shortcut has a letter alternative.
+ *
+ * On a Mac the function-key row is media and brightness controls unless Fn is
+ * held, so an F1-only binding is effectively no binding at all for most
+ * laptop users. The letters chosen are ones neither player's controls use.
+ */
 window.addEventListener('keydown', (e) => {
-  if (e.code === 'F1') { debugBoxes = !debugBoxes; view?.setDebug(debugBoxes); e.preventDefault() }
-  if (e.code === 'F2') { showPerf = !showPerf; perfRoot.classList.toggle('visible', showPerf); e.preventDefault() }
-  if (e.code === 'Tab' && screen === 'select') {
+  if (e.code === 'F1' || e.code === 'KeyB') {
+    debugBoxes = !debugBoxes
+    view?.setDebug(debugBoxes)
+    e.preventDefault()
+  }
+  if (e.code === 'F2' || e.code === 'KeyN') {
+    showPerf = !showPerf
+    perfRoot.classList.toggle('visible', showPerf)
+    e.preventDefault()
+  }
+  if ((e.code === 'Tab' || e.code === 'KeyM') && screen === 'select') {
     setMode(MODES[(MODES.indexOf(mode) + 1) % MODES.length]!)
     e.preventDefault()
   }
@@ -151,8 +166,8 @@ function showResult(state: MatchState): void {
        <div class="result-title">${nameOf(state.fighters[winner]!.charIndex)} WINS</div>
        <div class="result-score">${state.roundsWon[0]} — ${state.roundsWon[1]}</div>
        <div class="result-actions">
-         <span><b>J</b> / <b>Numpad1</b> — Rematch</span>
-         <span><b>U</b> / <b>Numpad4</b> — Character Select</span>
+         <span><b>J</b> / <b>;</b> — Rematch</span>
+         <span><b>U</b> / <b>]</b> — Character Select</span>
        </div>
      </div>`,
   )

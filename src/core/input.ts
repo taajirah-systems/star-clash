@@ -131,37 +131,66 @@ export interface InputSource {
   dispose?(): void
 }
 
-export interface KeyMap {
-  up: string
-  down: string
-  left: string
-  right: string
-  light: string
-  heavy: string
-  special: string
-  throw: string
-  jump: string
-  guard: string
-}
+/**
+ * Each action accepts several key codes.
+ *
+ * Multiple bindings exist because a laptop is not a desktop: player two was
+ * originally bound to Numpad1-6, which simply does not exist on a MacBook or
+ * on most compact keyboards, leaving that player with no way to attack at all.
+ * The numpad bindings are kept for desktop keyboards and a laptop-reachable
+ * set is listed alongside them.
+ */
+export type KeyMap = Record<
+  'up' | 'down' | 'left' | 'right' | 'light' | 'heavy' | 'special' | 'throw' | 'jump' | 'guard',
+  readonly string[]
+>
 
+/** Player one sits on the left half of the keyboard. */
 export const KEYMAP_P1: KeyMap = {
-  up: 'KeyW', down: 'KeyS', left: 'KeyA', right: 'KeyD',
-  light: 'KeyJ', heavy: 'KeyK', special: 'KeyL', throw: 'KeyU',
-  jump: 'KeyI', guard: 'KeyH',
+  up: ['KeyW'],
+  down: ['KeyS'],
+  left: ['KeyA'],
+  right: ['KeyD'],
+  light: ['KeyJ'],
+  heavy: ['KeyK'],
+  special: ['KeyL'],
+  throw: ['KeyU'],
+  jump: ['KeyI'],
+  guard: ['KeyH'],
 }
 
+/**
+ * Player two sits on the right: arrows to move, and the punctuation cluster
+ * beside them to attack. The numpad equivalents are listed second so a
+ * desktop keyboard keeps the arcade-style layout.
+ */
 export const KEYMAP_P2: KeyMap = {
-  up: 'ArrowUp', down: 'ArrowDown', left: 'ArrowLeft', right: 'ArrowRight',
-  light: 'Numpad1', heavy: 'Numpad2', special: 'Numpad3', throw: 'Numpad4',
-  jump: 'Numpad5', guard: 'Numpad6',
+  up: ['ArrowUp'],
+  down: ['ArrowDown'],
+  left: ['ArrowLeft'],
+  right: ['ArrowRight'],
+  light: ['Semicolon', 'Numpad1'],
+  heavy: ['Quote', 'Numpad2'],
+  special: ['BracketLeft', 'Numpad3'],
+  throw: ['BracketRight', 'Numpad4'],
+  jump: ['Slash', 'Numpad5'],
+  guard: ['Period', 'Numpad6'],
 }
 
 export class KeyboardSource implements InputSource {
   private readonly down = new Set<string>()
   private readonly onDown = (e: KeyboardEvent) => {
     this.down.add(e.code)
-    // Arrow keys and space scroll the page otherwise.
-    if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault()
+    // Arrows and space scroll the page; Slash and Quote open quick-find in
+    // some browsers, which steals every subsequent keystroke from the game.
+    if (
+      e.code.startsWith('Arrow') ||
+      e.code === 'Space' ||
+      e.code === 'Slash' ||
+      e.code === 'Quote'
+    ) {
+      e.preventDefault()
+    }
   }
   private readonly onUp = (e: KeyboardEvent) => this.down.delete(e.code)
   /**
@@ -177,19 +206,24 @@ export class KeyboardSource implements InputSource {
     window.addEventListener('blur', this.onBlur)
   }
 
+  private anyDown(codes: readonly string[]): boolean {
+    for (const c of codes) if (this.down.has(c)) return true
+    return false
+  }
+
   poll(): InputFrame {
     const m = this.map
     let f = 0
-    if (this.down.has(m.up)) f |= Btn.Up
-    if (this.down.has(m.down)) f |= Btn.Down
-    if (this.down.has(m.left)) f |= Btn.Left
-    if (this.down.has(m.right)) f |= Btn.Right
-    if (this.down.has(m.light)) f |= Btn.Light
-    if (this.down.has(m.heavy)) f |= Btn.Heavy
-    if (this.down.has(m.special)) f |= Btn.Special
-    if (this.down.has(m.throw)) f |= Btn.Throw
-    if (this.down.has(m.jump)) f |= Btn.Jump
-    if (this.down.has(m.guard)) f |= Btn.Guard
+    if (this.anyDown(m.up)) f |= Btn.Up
+    if (this.anyDown(m.down)) f |= Btn.Down
+    if (this.anyDown(m.left)) f |= Btn.Left
+    if (this.anyDown(m.right)) f |= Btn.Right
+    if (this.anyDown(m.light)) f |= Btn.Light
+    if (this.anyDown(m.heavy)) f |= Btn.Heavy
+    if (this.anyDown(m.special)) f |= Btn.Special
+    if (this.anyDown(m.throw)) f |= Btn.Throw
+    if (this.anyDown(m.jump)) f |= Btn.Jump
+    if (this.anyDown(m.guard)) f |= Btn.Guard
     return f
   }
 

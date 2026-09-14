@@ -18,15 +18,20 @@ npm run build      # typecheck + production bundle
 
 ## Controls
 
-|            | Player 1              | Player 2                |
-| ---------- | --------------------- | ----------------------- |
-| Move       | `W` `A` `S` `D`       | Arrow keys              |
-| Light      | `J`                   | `Numpad1`               |
-| Heavy      | `K`                   | `Numpad2`               |
-| Special    | `L`                   | `Numpad3`               |
-| Throw      | `U`                   | `Numpad4`               |
-| Jump       | `I`                   | `Numpad5`               |
-| Guard      | `H`                   | `Numpad6`               |
+|            | Player 1              | Player 2                        |
+| ---------- | --------------------- | ------------------------------- |
+| Move       | `W` `A` `S` `D`       | Arrow keys                      |
+| Light      | `J`                   | `;` *(or `Numpad1`)*            |
+| Heavy      | `K`                   | `'` *(or `Numpad2`)*            |
+| Special    | `L`                   | `[` *(or `Numpad3`)*            |
+| Throw      | `U`                   | `]` *(or `Numpad4`)*            |
+| Jump       | `I`                   | `/` *(or `Numpad5`)*            |
+| Guard      | `H`                   | `.` *(or `Numpad6`)*            |
+
+Player two has two bindings for every button. The numpad set is the arcade-style
+layout for a full desktop keyboard; the punctuation set exists because laptops —
+MacBooks included — have no numeric keypad, which previously left player two
+with no way to attack at all.
 
 Gamepads and arcade sticks are picked up automatically (pad 0 → P1, pad 1 → P2).
 Sticks are quantised to a digital cross so a pad and a keyboard produce
@@ -37,8 +42,13 @@ byte-identical input frames — replays and netcode stay device-agnostic.
 - **Down + Special** — the character's second signature move.
 - **Guard + Special** — spend a full signature meter (except Echo-Nine, whose
   adaptation triggers itself).
-- **F1** — draw the sim's live hitboxes and hurtboxes. **F2** — frame-time readout.
-- **Tab** — cycle Versus / Arcade / Training.
+- **`B`** *(or `F1`)* — draw the sim's live hitboxes and hurtboxes.
+- **`N`** *(or `F2`)* — frame-time readout.
+- **`M`** *(or `Tab`)* — cycle Versus / Arcade / Training.
+
+The letter alternatives exist because on macOS the function row is media and
+brightness control unless `Fn` is held, so an `F1`-only binding is no binding
+at all for most laptop users.
 
 ## Modes
 
